@@ -21,14 +21,22 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// PostgreSQL Pool Connection
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_DATABASE,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
+// PostgreSQL Pool Connection Configuration
+// Automatically uses cloud DATABASE_URL with SSL in production, or local settings in development
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false } // Required for cloud databases like Neon/Supabase
+      }
+    : {
+        user: process.env.DB_USER,
+        host: process.env.DB_HOST,
+        database: process.env.DB_DATABASE,
+        password: process.env.DB_PASSWORD,
+        port: process.env.DB_PORT,
+      }
+);
 
 // Test Database Connection
 pool.connect((err, client, release) => {
