@@ -3,13 +3,34 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit'); // Added Rate Limiting
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// ==========================================
+// SECURITY CONFIGURATION: CORS RESTRICTION
+// ==========================================
+// Replace the Vercel link below with your actual, live deployed Vercel URL
+const allowedOrigins = [
+  'http://localhost:5173', // Local frontend development
+  'https://osas-frontend.vercel.app' // Your live deployed Vercel frontend URL
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, system checks, or seed curls)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
 // Catch malformed JSON payload errors gracefully
@@ -21,13 +42,38 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// PostgreSQL Pool Connection Configuration
-// Automatically uses cloud DATABASE_URL with SSL in production, or local settings in development
+// ==========================================
+// SECURITY CONFIGURATION: RATE LIMITERS
+// ==========================================
+// 1. General Rate Limiter (Prevents DDoS and database spamming)
+// Limits each IP to 100 requests per 15 minutes
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, 
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 2. Strict Auth Limiter (Prevents Brute-force password guessing)
+// Limits each IP to 5 login attempts per 15 minutes
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, 
+  message: { error: 'Too many login attempts. Access temporarily restricted. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply the general rate limiter globally to all API routes
+app.use(generalLimiter);
+
+// PostgreSQL Pool Connection
 const pool = new Pool(
   process.env.DATABASE_URL
     ? {
         connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false } // Required for cloud databases like Neon/Supabase
+        ssl: { rejectUnauthorized: false }
       }
     : {
         user: process.env.DB_USER,
@@ -100,8 +146,8 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// POST: Login Route
-app.post('/api/auth/login', async (req, res) => {
+// POST: Login Route (SECURED: Uses strict login rate limiting)
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -140,10 +186,9 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// ORGANIZATIONS API (New)
+// ORGANIZATIONS API
 // ==========================================
 
-// GET: Publicly fetch all accredited organizations
 app.get('/api/organizations', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM organizations ORDER BY name ASC');
@@ -154,7 +199,6 @@ app.get('/api/organizations', async (req, res) => {
   }
 });
 
-// POST: Register a new accredited organization (SECURED: CORE Coordinator view)
 app.post('/api/organizations', authenticateToken, async (req, res) => {
   const { name, acronym, org_type, description, adviser } = req.body;
 
@@ -177,13 +221,11 @@ app.post('/api/organizations', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH: Update organization details / post a latest update bulletin (SECURED: CORE Coordinator view)
 app.patch('/api/organizations/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { name, acronym, org_type, description, adviser, latest_update } = req.body;
 
   try {
-    // Dynamic query building based on what fields are sent in the body
     const updates = [];
     const values = [];
     let idx = 1;
