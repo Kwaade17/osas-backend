@@ -181,6 +181,62 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 });
 
 // ==========================================
+// DYNAMIC SERVICES & PROGRAMS API (New)
+// ==========================================
+
+// GET: Retrieve all services and programs (Public)
+app.get('/api/site-services', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM site_services ORDER BY id ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch site services.' });
+  }
+});
+
+// POST: Add a new Service or Program (SECURED: Developer only)
+app.post('/api/site-services', authenticateToken, requireDeveloper, async (req, res) => {
+  const { title, description, icon_class, service_type } = req.body;
+
+  if (!title || !description || !icon_class || !service_type) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO site_services (title, description, icon_class, service_type) VALUES ($1, $2, $3, $4) RETURNING *',
+      [title, description, icon_class, service_type]
+    );
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not create service/program.' });
+  }
+});
+
+// PUT: Update an existing Service or Program (SECURED: Developer only)
+app.put('/api/site-services/:id', authenticateToken, requireDeveloper, async (req, res) => {
+  const { id } = req.params;
+  const { title, description, icon_class, service_type } = req.body;
+
+  if (!title || !description || !icon_class || !service_type) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE site_services SET title = $1, description = $2, icon_class = $3, service_type = $4 WHERE id = $5 RETURNING *',
+      [title, description, icon_class, service_type, id]
+    );
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not update service/program.' });
+  }
+});
+
+// ==========================================
 // DYNAMIC ABOUT PAGE API
 // ==========================================
 
@@ -220,7 +276,6 @@ app.put('/api/about/content', authenticateToken, requireDeveloper, async (req, r
   }
 });
 
-// POST: Add a new Functional Area Card (New Endpoint)
 app.post('/api/about/functional-areas', authenticateToken, requireDeveloper, async (req, res) => {
   const { title, description, key_operations } = req.body;
 
@@ -260,7 +315,6 @@ app.put('/api/about/functional-areas/:id', authenticateToken, requireDeveloper, 
   }
 });
 
-// POST: Add a new Staff Member Card (New Endpoint)
 app.post('/api/about/staff', authenticateToken, requireDeveloper, async (req, res) => {
   const { name, role, initials, color } = req.body;
 
@@ -447,7 +501,7 @@ app.post('/api/contact', async (req, res) => {
 // APPOINTMENTS API
 // ==========================================
 
-app.get('/api/appointments', authenticateToken, async (req, res) => {
+app.get('/api/appointments', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM appointments ORDER BY appointment_date DESC, appointment_time DESC');
     res.status(200).json(result.rows);
