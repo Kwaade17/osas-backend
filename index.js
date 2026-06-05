@@ -29,7 +29,8 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+// Increase the JSON payload size limit to 5MB to support Base64 image uploads
+app.use(express.json({ limit: '5mb' }));
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
