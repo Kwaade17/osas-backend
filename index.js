@@ -3,7 +3,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit'); // Added Rate Limiting
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
@@ -12,15 +12,13 @@ const PORT = process.env.PORT || 5000;
 // ==========================================
 // SECURITY CONFIGURATION: CORS RESTRICTION
 // ==========================================
-// Replace the Vercel link below with your actual, live deployed Vercel URL
 const allowedOrigins = [
-  'http://localhost:5173', // Local frontend development
-  'https://osas-frontend.vercel.app' // Your live deployed Vercel frontend URL
+  'http://localhost:5173', 
+  'https://osas-frontend.vercel.app' // Make sure this matches your real live Vercel URL
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, system checks, or seed curls)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
@@ -33,7 +31,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// Catch malformed JSON payload errors gracefully
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.warn('Bad Request: Malformed JSON payload received.');
@@ -45,27 +42,22 @@ app.use((err, req, res, next) => {
 // ==========================================
 // SECURITY CONFIGURATION: RATE LIMITERS
 // ==========================================
-// 1. General Rate Limiter (Prevents DDoS and database spamming)
-// Limits each IP to 100 requests per 15 minutes
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, 
   max: 100, 
   message: { error: 'Too many requests from this IP, please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// 2. Strict Auth Limiter (Prevents Brute-force password guessing)
-// Limits each IP to 5 login attempts per 15 minutes
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, 
   max: 5, 
   message: { error: 'Too many login attempts. Access temporarily restricted. Please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Apply the general rate limiter globally to all API routes
 app.use(generalLimiter);
 
 // PostgreSQL Pool Connection
@@ -117,7 +109,6 @@ const authenticateToken = (req, res, next) => {
 // AUTHENTICATION ROUTES
 // ==========================================
 
-// POST: Register/Seed Admin Account
 app.post('/api/auth/register', async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -146,7 +137,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// POST: Login Route (SECURED: Uses strict login rate limiting)
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
@@ -257,7 +247,7 @@ app.patch('/api/organizations/:id', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// ANNOUNCEMENTS API
+// ANNOUNCEMENTS API (Updated to support image_url)
 // ==========================================
 
 app.get('/api/announcements', async (req, res) => {
@@ -271,7 +261,7 @@ app.get('/api/announcements', async (req, res) => {
 });
 
 app.post('/api/announcements', authenticateToken, async (req, res) => {
-  const { title, category, summary, content } = req.body;
+  const { title, category, summary, content, image_url } = req.body;
 
   if (!title || !category || !summary) {
     return res.status(400).json({ error: 'Title, category, and summary are required fields.' });
@@ -279,11 +269,11 @@ app.post('/api/announcements', authenticateToken, async (req, res) => {
 
   try {
     const queryText = `
-      INSERT INTO announcements (title, category, summary, content) 
-      VALUES ($1, $2, $3, $4) 
+      INSERT INTO announcements (title, category, summary, content, image_url) 
+      VALUES ($1, $2, $3, $4, $5) 
       RETURNING *
     `;
-    const values = [title, category, summary, content || ''];
+    const values = [title, category, summary, content || '', image_url || ''];
     const result = await pool.query(queryText, values);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
