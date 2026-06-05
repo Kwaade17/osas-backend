@@ -49,7 +49,7 @@ const generalLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 100, // Temporarily increased limit for developer-phase tests
+  max: 5, 
   message: { error: 'Too many login attempts. Access temporarily restricted. Please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -235,6 +235,41 @@ app.put('/api/site-services/:id', authenticateToken, requireDeveloper, async (re
 });
 
 // ==========================================
+// DYNAMIC HOME LANDING CONTENT API (New)
+// ==========================================
+
+// GET: Fetch live Hero Title, Subtitle, and Background Image (Public)
+app.get('/api/home', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM home_content LIMIT 1');
+    res.status(200).json(result.rows[0] || {});
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch Home content.' });
+  }
+});
+
+// PUT: Save updated Hero text and Background Base64 image (SECURED: Developer only)
+app.put('/api/home', authenticateToken, requireDeveloper, async (req, res) => {
+  const { hero_title, hero_subtitle, hero_bg_image } = req.body;
+
+  if (!hero_title || !hero_subtitle || !hero_bg_image) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE home_content SET hero_title = $1, hero_subtitle = $2, hero_bg_image = $3 WHERE id = 1 RETURNING *',
+      [hero_title, hero_subtitle, hero_bg_image]
+    );
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not update Home content.' });
+  }
+});
+
+// ==========================================
 // DYNAMIC ABOUT PAGE API
 // ==========================================
 
@@ -274,7 +309,6 @@ app.put('/api/about/content', authenticateToken, requireDeveloper, async (req, r
   }
 });
 
-// POST: Add a new Functional Area Card (SECURED: Developer only)
 app.post('/api/about/functional-areas', authenticateToken, requireDeveloper, async (req, res) => {
   const { title, description, key_operations } = req.body;
 
@@ -314,7 +348,6 @@ app.put('/api/about/functional-areas/:id', authenticateToken, requireDeveloper, 
   }
 });
 
-// POST: Add a new Staff Member Card (SECURED: Developer only)
 app.post('/api/about/staff', authenticateToken, requireDeveloper, async (req, res) => {
   const { name, role, initials, color } = req.body;
 
@@ -501,7 +534,7 @@ app.post('/api/contact', async (req, res) => {
 // APPOINTMENTS API
 // ==========================================
 
-app.get('/api/appointments', authenticateToken, async (req, res) => {
+app.get('/api/appointments', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM appointments ORDER BY appointment_date DESC, appointment_time DESC');
     res.status(200).json(result.rows);
