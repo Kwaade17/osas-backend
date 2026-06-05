@@ -9,12 +9,10 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ==========================================
-// SECURITY CONFIGURATION: CORS RESTRICTION
-// ==========================================
+// CORS Restrictions
 const allowedOrigins = [
   'http://localhost:5173', 
-  'https://osas-frontend.vercel.app' // Make sure this matches your real live Vercel URL
+  'https://osas-frontend.vercel.app' 
 ];
 
 app.use(cors({
@@ -29,7 +27,6 @@ app.use(cors({
   credentials: true
 }));
 
-// Increase the JSON payload size limit to 5MB to support Base64 image uploads
 app.use(express.json({ limit: '5mb' }));
 
 app.use((err, req, res, next) => {
@@ -40,9 +37,7 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// ==========================================
-// SECURITY CONFIGURATION: RATE LIMITERS
-// ==========================================
+// Rate Limiters
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
@@ -87,8 +82,9 @@ pool.connect((err, client, release) => {
 });
 
 // ==========================================
-// SECURITY MIDDLEWARE (Route Guard)
+// SECURITY MIDDLEWARES
 // ==========================================
+
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -106,12 +102,19 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+const requireDeveloper = (req, res, next) => {
+  if (req.user.role !== 'developer') {
+    return res.status(403).json({ error: 'Access denied. Developer privileges required.' });
+  }
+  next();
+};
+
 // ==========================================
 // AUTHENTICATION ROUTES
 // ==========================================
 
 app.post('/api/auth/register', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, role } = req.body;
 
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email, and password are required.' });
@@ -125,10 +128,11 @@ app.post('/api/auth/register', async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
+    const userRole = role || 'admin';
 
     const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
-      [name, email, passwordHash]
+      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role',
+      [name, email, passwordHash, userRole]
     );
 
     res.status(201).json({ success: true, user: result.rows[0] });
@@ -159,7 +163,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, name: user.name },
+      { id: user.id, email: user.email, name: user.name, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '2h' }
     );
@@ -168,11 +172,131 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       success: true,
       message: 'Login successful!',
       token,
-      user: { id: user.id, name: user.name, email: user.email }
+      user: { id: user.id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
     console.error('Login error:', error.message);
     res.status(500).json({ error: 'Server error, could not process login.' });
+  }
+});
+
+// ==========================================
+// DYNAMIC ABOUT PAGE API
+// ==========================================
+
+app.get('/api/about', async (req, res) => {
+  try {
+    const content = await pool.query('SELECT * FROM about_content LIMIT 1');
+    const functionalAreas = await pool.query('SELECT * FROM about_functional_areas ORDER BY id ASC');
+    const staff = await pool.query('SELECT * FROM about_staff ORDER BY id ASC');
+
+    res.status(200).json({
+      content: content.rows[0] || {},
+      functionalAreas: functionalAreas.rows,
+      staff: staff.rows
+    });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch About content.' });
+  }
+});
+
+app.put('/api/about/content', authenticateToken, requireDeveloper, async (req, res) => {
+  const { heading, subheading, vision, mission } = req.body;
+
+  if (!heading || !subheading || !vision || !mission) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE about_content SET heading = $1, subheading = $2, vision = $3, mission = $4 WHERE id = 1 RETURNING *',
+      [heading, subheading, vision, mission]
+    );
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save modifications.' });
+  }
+});
+
+// POST: Add a new Functional Area Card (New Endpoint)
+app.post('/api/about/functional-areas', authenticateToken, requireDeveloper, async (req, res) => {
+  const { title, description, key_operations } = req.body;
+
+  if (!title || !description || !key_operations) {
+    return res.status(400).json({ error: 'All fields are required to register a functional area.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO about_functional_areas (title, description, key_operations) VALUES ($1, $2, $3) RETURNING *',
+      [title, description, key_operations]
+    );
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not create card.' });
+  }
+});
+
+app.put('/api/about/functional-areas/:id', authenticateToken, requireDeveloper, async (req, res) => {
+  const { id } = req.params;
+  const { title, description, key_operations } = req.body;
+
+  if (!title || !description || !key_operations) {
+    return res.status(400).json({ error: 'All card fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE about_functional_areas SET title = $1, description = $2, key_operations = $3 WHERE id = $4 RETURNING *',
+      [title, description, key_operations, id]
+    );
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save card updates.' });
+  }
+});
+
+// POST: Add a new Staff Member Card (New Endpoint)
+app.post('/api/about/staff', authenticateToken, requireDeveloper, async (req, res) => {
+  const { name, role, initials, color } = req.body;
+
+  if (!name || !role || !initials) {
+    return res.status(400).json({ error: 'All fields are required to add a staff profile.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO about_staff (name, role, initials, color) VALUES ($1, $2, $3, $4) RETURNING *',
+      [name, role, initials, color || 'bg-emerald-800']
+    );
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save staff.' });
+  }
+});
+
+app.put('/api/about/staff/:id', authenticateToken, requireDeveloper, async (req, res) => {
+  const { id } = req.params;
+  const { name, role, initials, color } = req.body;
+
+  if (!name || !role || !initials) {
+    return res.status(400).json({ error: 'All staff fields are required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE about_staff SET name = $1, role = $2, initials = $3, color = $4 WHERE id = $5 RETURNING *',
+      [name, role, initials, color || 'bg-emerald-800', id]
+    );
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save staff updates.' });
   }
 });
 
@@ -248,7 +372,7 @@ app.patch('/api/organizations/:id', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// ANNOUNCEMENTS API (Updated to support image_url)
+// ANNOUNCEMENTS API
 // ==========================================
 
 app.get('/api/announcements', async (req, res) => {
