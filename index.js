@@ -27,6 +27,7 @@ app.use(cors({
   credentials: true
 }));
 
+// Set JSON limits to 5MB to handle Base64 uploads safely
 app.use(express.json({ limit: '5mb' }));
 
 app.use((err, req, res, next) => {
@@ -48,7 +49,7 @@ const generalLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 5, 
+  max: 100, // Temporarily increased limit for developer-phase tests
   message: { error: 'Too many login attempts. Access temporarily restricted. Please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -181,10 +182,9 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 });
 
 // ==========================================
-// DYNAMIC SERVICES & PROGRAMS API (New)
+// DYNAMIC SITE SERVICES & PROGRAMS API
 // ==========================================
 
-// GET: Retrieve all services and programs (Public)
 app.get('/api/site-services', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM site_services ORDER BY id ASC');
@@ -195,7 +195,6 @@ app.get('/api/site-services', async (req, res) => {
   }
 });
 
-// POST: Add a new Service or Program (SECURED: Developer only)
 app.post('/api/site-services', authenticateToken, requireDeveloper, async (req, res) => {
   const { title, description, icon_class, service_type } = req.body;
 
@@ -215,7 +214,6 @@ app.post('/api/site-services', authenticateToken, requireDeveloper, async (req, 
   }
 });
 
-// PUT: Update an existing Service or Program (SECURED: Developer only)
 app.put('/api/site-services/:id', authenticateToken, requireDeveloper, async (req, res) => {
   const { id } = req.params;
   const { title, description, icon_class, service_type } = req.body;
@@ -276,6 +274,7 @@ app.put('/api/about/content', authenticateToken, requireDeveloper, async (req, r
   }
 });
 
+// POST: Add a new Functional Area Card (SECURED: Developer only)
 app.post('/api/about/functional-areas', authenticateToken, requireDeveloper, async (req, res) => {
   const { title, description, key_operations } = req.body;
 
@@ -315,6 +314,7 @@ app.put('/api/about/functional-areas/:id', authenticateToken, requireDeveloper, 
   }
 });
 
+// POST: Add a new Staff Member Card (SECURED: Developer only)
 app.post('/api/about/staff', authenticateToken, requireDeveloper, async (req, res) => {
   const { name, role, initials, color } = req.body;
 
@@ -501,7 +501,7 @@ app.post('/api/contact', async (req, res) => {
 // APPOINTMENTS API
 // ==========================================
 
-app.get('/api/appointments', async (req, res) => {
+app.get('/api/appointments', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM appointments ORDER BY appointment_date DESC, appointment_time DESC');
     res.status(200).json(result.rows);
