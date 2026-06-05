@@ -235,10 +235,9 @@ app.put('/api/site-services/:id', authenticateToken, requireDeveloper, async (re
 });
 
 // ==========================================
-// DYNAMIC HOME LANDING CONTENT API (New)
+// DYNAMIC HOME LANDING CONTENT API
 // ==========================================
 
-// GET: Fetch live Hero Title, Subtitle, and Background Image (Public)
 app.get('/api/home', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM home_content LIMIT 1');
@@ -249,7 +248,6 @@ app.get('/api/home', async (req, res) => {
   }
 });
 
-// PUT: Save updated Hero text and Background Base64 image (SECURED: Developer only)
 app.put('/api/home', authenticateToken, requireDeveloper, async (req, res) => {
   const { hero_title, hero_subtitle, hero_bg_image } = req.body;
 
@@ -384,6 +382,69 @@ app.put('/api/about/staff/:id', authenticateToken, requireDeveloper, async (req,
   } catch (error) {
     console.error('Database query error:', error.message);
     res.status(500).json({ error: 'Server error, could not save staff updates.' });
+  }
+});
+
+// ==========================================
+// DYNAMIC NAVIGATION SERVICES PAGE CONTENT API (New)
+// ==========================================
+
+// GET: Publicly read dynamic contents of the actual Services Page [1]
+app.get('/api/services-page', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM services_page_content ORDER BY id ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch Services page content.' });
+  }
+});
+
+// PUT: Save updated text/sidebars of a Services Page block (SECURED: Developer only) [1]
+app.put('/api/services-page/:id', authenticateToken, requireDeveloper, async (req, res) => {
+  const { id } = req.params;
+  const { 
+    title, icon_emoji, description, 
+    feature_one_title, feature_one_desc, 
+    feature_two_title, feature_two_desc, 
+    feature_three_title, feature_three_desc, 
+    instructions, sidebar_title, sidebar_text, 
+    btn_primary_text, btn_secondary_text 
+  } = req.body;
+
+  if (!title || !icon_emoji || !description || !feature_one_title || !feature_one_desc || !feature_two_title || !feature_two_desc || !sidebar_title || !sidebar_text || !btn_primary_text || !btn_secondary_text) {
+    return res.status(400).json({ error: 'All required text parameters are missing.' });
+  }
+
+  try {
+    const queryText = `
+      UPDATE services_page_content SET 
+        title = $1, icon_emoji = $2, description = $3, 
+        feature_one_title = $4, feature_one_desc = $5, 
+        feature_two_title = $6, feature_two_desc = $7, 
+        feature_three_title = $8, feature_three_desc = $9, 
+        instructions = $10, sidebar_title = $11, sidebar_text = $12, 
+        btn_primary_text = $13, btn_secondary_text = $14
+      WHERE id = $15 RETURNING *
+    `;
+    const values = [
+      title, icon_emoji, description, 
+      feature_one_title, feature_one_desc, 
+      feature_two_title, feature_two_desc, 
+      feature_three_title || '', feature_three_desc || '', 
+      instructions || '', sidebar_title, sidebar_text, 
+      btn_primary_text, btn_secondary_text, id
+    ];
+    const result = await pool.query(queryText, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Service page block not found.' });
+    }
+
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save changes.' });
   }
 });
 
@@ -598,5 +659,5 @@ app.get('/', (req, res) => {
 
 // Start Server
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log('Server is running on http://localhost:${PORT}');
 });
