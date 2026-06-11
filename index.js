@@ -652,6 +652,42 @@ app.patch('/api/appointments/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// REQUEST ID API
+// ==========================================
+
+app.get('/api/id_request_process', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM id_request_process ORDER BY request_at');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch appointments.' });
+  }
+});
+
+app.post('/api/id_request_process', async (req, res) => {
+  const { request_type, programs, first_name, middle_name, last_name, year_level, request_at } = req.body;
+
+  if (!request_type || !programs || !first_name || !middle_name || !last_name || !year_level || !request_at) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const queryText = `
+      INSERT INTO id_request_process (request_type, programs, first_name, middle_name, last_name, year_level, request_at) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7) 
+      RETURNING *
+    `;
+    const values = [request_type, programs, first_name, middle_name, last_name, year_level, request_at];
+    const result = await pool.query(queryText, values);
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save request.' });
+  }
+});
+
 // Base Route
 app.get('/', (req, res) => {
   res.send('OSAS API Server is running.');
@@ -659,5 +695,5 @@ app.get('/', (req, res) => {
 
 // Start Server
 app.listen(PORT, () => {
-  console.log('Server is running on http://localhost:${PORT}');
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
