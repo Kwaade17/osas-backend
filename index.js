@@ -49,7 +49,7 @@ const generalLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 5, 
+  max: 100, 
   message: { error: 'Too many login attempts. Access temporarily restricted. Please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -386,10 +386,9 @@ app.put('/api/about/staff/:id', authenticateToken, requireDeveloper, async (req,
 });
 
 // ==========================================
-// DYNAMIC NAVIGATION SERVICES PAGE CONTENT API (New)
+// DYNAMIC NAVIGATION SERVICES PAGE CONTENT API
 // ==========================================
 
-// GET: Publicly read dynamic contents of the actual Services Page [1]
 app.get('/api/services-page', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM services_page_content ORDER BY id ASC');
@@ -400,7 +399,6 @@ app.get('/api/services-page', async (req, res) => {
   }
 });
 
-// PUT: Save updated text/sidebars of a Services Page block (SECURED: Developer only) [1]
 app.put('/api/services-page/:id', authenticateToken, requireDeveloper, async (req, res) => {
   const { id } = req.params;
   const { 
@@ -595,7 +593,7 @@ app.post('/api/contact', async (req, res) => {
 // APPOINTMENTS API
 // ==========================================
 
-app.get('/api/appointments', async (req, res) => {
+app.get('/api/appointments', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM appointments ORDER BY appointment_date DESC, appointment_time DESC');
     res.status(200).json(result.rows);
@@ -653,38 +651,138 @@ app.patch('/api/appointments/:id', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// REQUEST ID API
+// TRANSACTIONS: ID REQUEST PROCESS API (New) [1]
 // ==========================================
 
-app.get('/api/id_request_process', async (req, res) => {
+// GET: Fetch all active ID processing requests (SECURED: Admin/Developer only) [1]
+app.get('/api/id_requests', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM id_request_process ORDER BY request_at');
+    const result = await pool.query('SELECT * FROM id_requests ORDER BY created_at DESC');
     res.status(200).json(result.rows);
   } catch (error) {
     console.error('Database query error:', error.message);
-    res.status(500).json({ error: 'Server error, could not fetch appointments.' });
+    res.status(500).json({ error: 'Server error, could not fetch ID requests.' });
   }
 });
 
+// POST: Public student ID Request Submission [1]
 app.post('/api/id_request_process', async (req, res) => {
-  const { request_type, programs, first_name, middle_name, last_name, year_level, request_at } = req.body;
+  const { request_type, programs, first_name, middle_name, last_name, year_level } = req.body;
 
-  if (!request_type || !programs || !first_name || !middle_name || !last_name || !year_level || !request_at) {
+  if (!request_type || !programs || !first_name || !middle_name || !last_name || !year_level) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
   try {
     const queryText = `
-      INSERT INTO id_request_process (request_type, programs, first_name, middle_name, last_name, year_level, request_at) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7) 
+      INSERT INTO id_requests (request_type, programs, first_name, middle_name, last_name, year_level) 
+      VALUES ($1, $2, $3, $4, $5, $6) 
       RETURNING *
     `;
-    const values = [request_type, programs, first_name, middle_name, last_name, year_level, request_at];
+    const values = [request_type, programs, first_name, middle_name, last_name, year_level];
     const result = await pool.query(queryText, values);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
+    console.error('ID Request Error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save ID request.' });
+  }
+});
+
+// PATCH: Update ID Request Status (SECURED: Admin/Developer only) [1]
+app.patch('/api/id_requests/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ error: 'Status is required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE id_requests SET status = $1 WHERE id = $2 RETURNING *',
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'ID request record not found.' });
+    }
+
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
     console.error('Database query error:', error.message);
-    res.status(500).json({ error: 'Server error, could not save request.' });
+    res.status(500).json({ error: 'Server error, could not update ID request status.' });
+  }
+});
+
+// ==========================================
+// TRANSACTIONS: GOOD MORAL REQUESTS API (New) [1]
+// ==========================================
+
+// GET: Fetch all active GMC requests (SECURED: Admin/Developer only) [1]
+app.get('/api/gmc_requests', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM gmc_requests ORDER BY created_at DESC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch GMC requests.' });
+  }
+});
+
+// POST: Public student GMC Request Submission [1]
+app.post('/api/gmc_request', async (req, res) => {
+  const { 
+    gmc_type, last_name, first_name, middle_name, programs, 
+    date_graduated, school_year, year_level, semester 
+  } = req.body;
+
+  if (!gmc_type || !last_name || !first_name || !middle_name || !programs) {
+    return res.status(400).json({ error: 'Required text fields are missing.' });
+  }
+
+  try {
+    const queryText = `
+      INSERT INTO gmc_requests (
+        gmc_type, last_name, first_name, middle_name, programs, 
+        date_graduated, school_year, year_level, semester
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+      RETURNING *
+    `;
+    const values = [
+      gmc_type, last_name, first_name, middle_name, programs, 
+      date_graduated, school_year, year_level, semester
+    ];
+    const result = await pool.query(queryText, values);
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('GMC Request Error:', error.message);
+    res.status(500).json({ error: 'Server error, could not save GMC request.' });
+  }
+});
+
+// PATCH: Update GMC Request Status (SECURED: Admin/Developer only) [1]
+app.patch('/api/gmc_requests/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ error: 'Status is required.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE gmc_requests SET status = $1 WHERE id = $2 RETURNING *',
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'GMC request record not found.' });
+    }
+
+    res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Database query error:', error.message);
+    res.status(500).json({ error: 'Server error, could not update GMC request status.' });
   }
 });
 
