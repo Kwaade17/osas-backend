@@ -786,6 +786,33 @@ app.patch('/api/gmc_requests/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// GET: Publicly visible claimable queue (Combines ID and GMC requests with masked details) [1]
+app.get('/api/public/requests', async (req, res) => {
+  try {
+    // Fetch active ID requests
+    const ids = await pool.query(`
+      SELECT id, last_name, first_name, programs, 'ID Request' AS type, status, created_at 
+      FROM id_requests 
+      ORDER BY created_at DESC
+    `);
+    
+    // Fetch active GMC requests
+    const gmcs = await pool.query(`
+      SELECT id, last_name, first_name, programs, 'Good Moral' AS type, status, created_at 
+      FROM gmc_requests 
+      ORDER BY created_at DESC
+    `);
+    
+    // Combine both list arrays and sort them by date (newest first)
+    const combined = [...ids.rows, ...gmcs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    res.status(200).json(combined);
+  } catch (error) {
+    console.error('Public requests error:', error.message);
+    res.status(500).json({ error: 'Server error, could not fetch claim queue.' });
+  }
+});
+
 // Base Route
 app.get('/', (req, res) => {
   res.send('OSAS API Server is running.');
