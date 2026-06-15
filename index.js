@@ -27,7 +27,6 @@ app.use(cors({
   credentials: true
 }));
 
-// Set JSON limits to 5MB to handle Base64 uploads safely
 app.use(express.json({ limit: '5mb' }));
 
 app.use((err, req, res, next) => {
@@ -73,12 +72,44 @@ const pool = new Pool(
       }
 );
 
+// Auto-seed Admin and Developer Accounts on Server Start [1]
+const seedAccounts = async () => {
+  try {
+    const salt = await bcrypt.genSalt(10);
+    
+    // 1. Seed Admin Account if missing [1]
+    const adminExist = await pool.query('SELECT * FROM users WHERE email = $1', ['admin@lccc.edu.ph']);
+    if (adminExist.rows.length === 0) {
+      const adminHash = await bcrypt.hash('admin12345', salt);
+      await pool.query(
+        'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+        ['LCCC OSAS Admin', 'admin@lccc.edu.ph', adminHash, 'admin']
+      );
+      console.log('Database Seeder: admin@lccc.edu.ph prepared.');
+    }
+
+    // 2. Seed Developer Account if missing [1]
+    const devExist = await pool.query('SELECT * FROM users WHERE email = $1', ['developer@lccc.edu.ph']);
+    if (devExist.rows.length === 0) {
+      const devHash = await bcrypt.hash('dev12345', salt);
+      await pool.query(
+        'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+        ['LCCC Developer', 'developer@lccc.edu.ph', devHash, 'developer']
+      );
+      console.log('Database Seeder: developer@lccc.edu.ph prepared.');
+    }
+  } catch (err) {
+    console.error('Account seeding error:', err.message);
+  }
+};
+
 // Test Database Connection
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Error acquiring client from pool:', err.stack);
   }
   console.log('Successfully connected to PostgreSQL database!');
+  seedAccounts(); // Trigger self-seeding [1]
   release();
 });
 
@@ -182,7 +213,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 });
 
 // ==========================================
-// DYNAMIC SITE SERVICES & PROGRAMS API
+// SITE SERVICES & PROGRAMS API
 // ==========================================
 
 app.get('/api/site-services', async (req, res) => {
@@ -654,7 +685,6 @@ app.patch('/api/appointments/:id', authenticateToken, async (req, res) => {
 // TRANSACTIONS: ID REQUEST PROCESS API (New) [1]
 // ==========================================
 
-// GET: Fetch all active ID processing requests (SECURED: Admin/Developer only) [1]
 app.get('/api/id_requests', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM id_requests ORDER BY created_at DESC');
@@ -665,7 +695,6 @@ app.get('/api/id_requests', authenticateToken, async (req, res) => {
   }
 });
 
-// POST: Public student ID Request Submission [1]
 app.post('/api/id_request_process', async (req, res) => {
   const { request_type, programs, first_name, middle_name, last_name, year_level } = req.body;
 
@@ -688,7 +717,6 @@ app.post('/api/id_request_process', async (req, res) => {
   }
 });
 
-// PATCH: Update ID Request Status (SECURED: Admin/Developer only) [1]
 app.patch('/api/id_requests/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -718,7 +746,6 @@ app.patch('/api/id_requests/:id', authenticateToken, async (req, res) => {
 // TRANSACTIONS: GOOD MORAL REQUESTS API (New) [1]
 // ==========================================
 
-// GET: Fetch all active GMC requests (SECURED: Admin/Developer only) [1]
 app.get('/api/gmc_requests', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM gmc_requests ORDER BY created_at DESC');
@@ -729,7 +756,6 @@ app.get('/api/gmc_requests', authenticateToken, async (req, res) => {
   }
 });
 
-// POST: Public student GMC Request Submission [1]
 app.post('/api/gmc_request', async (req, res) => {
   const { 
     gmc_type, last_name, first_name, middle_name, programs, 
@@ -760,7 +786,6 @@ app.post('/api/gmc_request', async (req, res) => {
   }
 });
 
-// PATCH: Update GMC Request Status (SECURED: Admin/Developer only) [1]
 app.patch('/api/gmc_requests/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -783,33 +808,6 @@ app.patch('/api/gmc_requests/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Database query error:', error.message);
     res.status(500).json({ error: 'Server error, could not update GMC request status.' });
-  }
-});
-
-// GET: Publicly visible claimable queue (Combines ID and GMC requests with masked details) [1]
-app.get('/api/public/requests', async (req, res) => {
-  try {
-    // Fetch active ID requests
-    const ids = await pool.query(`
-      SELECT id, last_name, first_name, programs, 'ID Request' AS type, status, created_at 
-      FROM id_requests 
-      ORDER BY created_at DESC
-    `);
-    
-    // Fetch active GMC requests
-    const gmcs = await pool.query(`
-      SELECT id, last_name, first_name, programs, 'Good Moral' AS type, status, created_at 
-      FROM gmc_requests 
-      ORDER BY created_at DESC
-    `);
-    
-    // Combine both list arrays and sort them by date (newest first)
-    const combined = [...ids.rows, ...gmcs.rows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    
-    res.status(200).json(combined);
-  } catch (error) {
-    console.error('Public requests error:', error.message);
-    res.status(500).json({ error: 'Server error, could not fetch claim queue.' });
   }
 });
 
